@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, Music, Play, Pause, RefreshCw, Volume2, VolumeX, Edit2, Download, Loader2, X, User } from 'lucide-react';
+import { Upload, Music, Play, Pause, RefreshCw, Volume2, VolumeX, Edit2, Download, Loader2, X, User, Info } from 'lucide-react';
 import { AudioVisualizer } from './components/AudioVisualizer';
 import { ColorPicker } from './components/ColorPicker';
 import { cn } from './lib/utils';
@@ -28,6 +28,7 @@ export default function App() {
 
   // Customization State
   const [showCustomization, setShowCustomization] = useState(false);
+  const [showInfoModal, setShowInfoModal] = useState(false);
   const [customTab, setCustomTab] = useState<'image' | 'waves' | 'particles'>('image');
   
   const [mainImgUrl, setMainImgUrl] = useState('');
@@ -242,15 +243,15 @@ export default function App() {
         <div className="absolute inset-0 pointer-events-none z-10" onClick={handleBackgroundClick}>
           <AudioVisualizer 
             audioElement={audioElement} 
-            mainImgUrl={mainImgUrl}
-            mainImgOffsetX={mainRight - mainLeft}
-            mainImgOffsetY={mainDown - mainUp}
+            mainImgUrl={mainImgUrl && !mainImgError ? mainImgUrl : 'https://res.cloudinary.com/dihiciksp/image/upload/v1786651249/defolt_main_img_h4sh7j.png'}
+            mainImgOffsetX={mainImgUrl && !mainImgError ? (mainRight - mainLeft) : 0}
+            mainImgOffsetY={mainImgUrl && !mainImgError ? (mainDown - mainUp) : 0}
             bgImgUrl={bgImgUrl && !bgImgError ? bgImgUrl : 'https://res.cloudinary.com/dihiciksp/image/upload/v1786650005/fon-fsviz_iu8oh9.png'}
             bgOffsetX={bgImgUrl && !bgImgError ? (bgRight - bgLeft) : 0}
             bgOffsetY={bgImgUrl && !bgImgError ? (bgDown - bgUp) : 0}
             bgDimming={bgImgUrl && !bgImgError ? bgDimming : 50}
             bgCinematic={bgImgUrl && !bgImgError ? bgCinematic : false}
-            mainImgZoom={mainImgZoom}
+            mainImgZoom={mainImgUrl && !mainImgError ? mainImgZoom : 0}
             bgImgZoom={bgImgUrl && !bgImgError ? bgImgZoom : 0}
             isRecording={isRecording}
             exportSettings={{ fps: exportFps, bitrate: exportBitrate * 1000000, mimeType: exportCodec, resolution: exportResolution }}
@@ -799,8 +800,74 @@ export default function App() {
           >
             <RefreshCw className="w-4 h-4" />
           </button>
+          
+          <button
+            onClick={() => setShowInfoModal(true)}
+            title="How to Use"
+            disabled={isRecording}
+            className="w-10 h-10 flex items-center justify-center rounded-full text-gray-400 hover:text-[#00f2fe] hover:bg-[#00f2fe]/10 transition-colors disabled:opacity-50"
+          >
+            <Info className="w-4 h-4" />
+          </button>
         </div>
       </div>
+
+      {/* Info Modal */}
+      {showInfoModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-md p-4" onClick={() => setShowInfoModal(false)}>
+          <div 
+            className="bg-[#111116] border border-white/10 rounded-2xl p-8 max-w-lg w-full shadow-2xl animate-in fade-in zoom-in-95 relative max-h-[85vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => setShowInfoModal(false)}
+              className="absolute top-4 right-4 text-gray-500 hover:text-white p-2 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            
+            <h2 className="text-2xl font-semibold mb-6 bg-clip-text text-transparent bg-gradient-to-r from-[#00f2fe] to-[#4facfe]">
+              How to Use the Music Visualizer
+            </h2>
+            
+            <div className="overflow-y-auto pr-4 space-y-5 text-sm text-gray-300 custom-scrollbar flex-1">
+              <p>So, you have added your music.<br/>What's next?</p>
+              
+              <p>Click the <strong className="text-white">pencil icon</strong> to start customizing your style.</p>
+              
+              <p>You can add <strong className="text-white">two custom images for the background</strong>, as well as an image inside the central circle, from which the waves emerge and react to your music.</p>
+              
+              <p>Each image can be <strong className="text-white">moved and zoomed</strong> so you can position it exactly where you want.</p>
+              
+              <p>You can also adjust the <strong className="text-white">background brightness</strong> and enable <strong className="text-white">Cinematic Blur</strong> if your image does not fully cover the background.</p>
+              
+              <p>Next, move on to the <strong className="text-white">Waves</strong> settings.</p>
+              
+              <p>Here, you can change the colors of the waves and customize their appearance. The visualizer has <strong className="text-white">two waves</strong>, and you can also enable or disable the <strong className="text-white">fill between the waves</strong>.</p>
+              
+              <p>Customize the wave colors however you like and create your own visual style.</p>
+              
+              <p>We also have <strong className="text-white">Particles</strong>.</p>
+              
+              <p>You can leave <strong className="text-white">Follow the Waves</strong> enabled. This mode automatically adjusts the particles to match the colors of your waves.</p>
+              
+              <p>If you disable <strong className="text-white">Follow the Waves</strong>, you can customize the particle colors separately and create your own combination.</p>
+              
+              <p>Once you have finished customizing your style, or decided to keep the default settings, you can move on to exporting.</p>
+              
+              <p>Choose the <strong className="text-white">export settings</strong> you need and adjust the video quality and other options.</p>
+              
+              <p className="pt-2">Ready?</p>
+              
+              <p>Click <strong className="text-white font-medium px-2 py-1 bg-white/10 rounded">Export</strong> and wait for the export to finish.</p>
+              
+              <p>And that's it!</p>
+              
+              <p className="text-[#00f2fe]">Your music video with the visualizer is now ready and saved to your device.</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       <input
         type="file"
