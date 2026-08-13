@@ -1,0 +1,6 @@
+{
+  "name": "Avee-Style Visualizer",
+  "description": "An advanced, smooth circular music visualizer with reactive particles.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
