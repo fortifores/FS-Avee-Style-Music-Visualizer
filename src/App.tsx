@@ -245,7 +245,7 @@ export default function App() {
             mainImgUrl={mainImgUrl}
             mainImgOffsetX={mainRight - mainLeft}
             mainImgOffsetY={mainDown - mainUp}
-            bgImgUrl={bgImgUrl && !bgImgError ? bgImgUrl : 'https://res.cloudinary.com/dihiciksp/image/upload/v1786649229/fon-fsviz_uaid7j.png'}
+            bgImgUrl={bgImgUrl && !bgImgError ? bgImgUrl : 'https://res.cloudinary.com/dihiciksp/image/upload/v1786650005/fon-fsviz_iu8oh9.png'}
             bgOffsetX={bgImgUrl && !bgImgError ? (bgRight - bgLeft) : 0}
             bgOffsetY={bgImgUrl && !bgImgError ? (bgDown - bgUp) : 0}
             bgDimming={bgImgUrl && !bgImgError ? bgDimming : 50}
