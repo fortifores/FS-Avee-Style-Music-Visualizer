@@ -17,6 +17,7 @@ interface AudioVisualizerProps {
     fps: number;
     bitrate: number;
     mimeType: string;
+    resolution?: string;
   };
   onRecordingComplete?: (blob: Blob) => void;
   frontWaveColor?: string;
@@ -79,7 +80,7 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
   const audioCtxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const sourceRef = useRef<MediaElementAudioSourceNode | null>(null);
-  const sourceConnected = useRef(false);
+  const connectedElementRef = useRef<HTMLAudioElement | null>(null);
   const particlesRef = useRef<Particle[]>([]);
   const currentRadiusRef = useRef(150);
   const mainImageRef = useRef<HTMLImageElement | null>(null);
@@ -141,17 +142,30 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
       analyserRef.current.smoothingTimeConstant = 0.85;
     }
 
-    if (!sourceConnected.current && audioCtxRef.current && analyserRef.current) {
+    if (connectedElementRef.current !== audioElement && audioCtxRef.current && analyserRef.current) {
       try {
+        if (sourceRef.current) {
+          try {
+            sourceRef.current.disconnect();
+          } catch (e) {
+            // ignore
+          }
+        }
         sourceRef.current = audioCtxRef.current.createMediaElementSource(audioElement);
         sourceRef.current.connect(analyserRef.current);
         analyserRef.current.connect(audioCtxRef.current.destination);
-        sourceConnected.current = true;
+        connectedElementRef.current = audioElement;
       } catch (e) {
         console.error('Audio routing error:', e);
       }
     }
   }, [audioElement]);
+
+  useEffect(() => {
+    return () => {
+      audioCtxRef.current?.close();
+    };
+  }, []);
 
   // Resume context if needed when playing starts
   useEffect(() => {
@@ -172,9 +186,18 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
         const audioCtx = audioCtxRef.current;
         if (!canvas || !audioCtx) return;
 
-        // Force 1080p resolution for recording
-        canvas.width = 1920;
-        canvas.height = 1080;
+        // Set resolution for recording
+        const res = exportSettings?.resolution || '1080p';
+        if (res === '720p') {
+            canvas.width = 1280;
+            canvas.height = 720;
+        } else if (res === '4k') {
+            canvas.width = 3840;
+            canvas.height = 2160;
+        } else {
+            canvas.width = 1920;
+            canvas.height = 1080;
+        }
 
         const fps = exportSettings?.fps || 60;
         const canvasStream = canvas.captureStream(fps);
@@ -238,7 +261,14 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
         mediaRecorderRef.current = recorder;
         recorder.start();
     } else if (!isRecording && mediaRecorderRef.current) {
-        mediaRecorderRef.current.stop();
+        if (mediaRecorderRef.current.state !== 'inactive') {
+            try {
+                mediaRecorderRef.current.requestData();
+            } catch (e) {
+                console.error('Failed to request data:', e);
+            }
+            mediaRecorderRef.current.stop();
+        }
     }
   }, [isRecording, onRecordingComplete, exportSettings]);
 

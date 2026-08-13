@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, Music, Play, Pause, RefreshCw, Volume2, VolumeX, Edit2, Download, Loader2 } from 'lucide-react';
+import { Upload, Music, Play, Pause, RefreshCw, Volume2, VolumeX, Edit2, Download, Loader2, X, User } from 'lucide-react';
 import { AudioVisualizer } from './components/AudioVisualizer';
 import { ColorPicker } from './components/ColorPicker';
 import { cn } from './lib/utils';
@@ -70,6 +70,7 @@ export default function App() {
   const [exportFps, setExportFps] = useState(60);
   const [exportBitrate, setExportBitrate] = useState(18); // Mbps
   const [exportCodec, setExportCodec] = useState('video/webm;codecs=vp9,opus');
+  const [exportResolution, setExportResolution] = useState('1080p');
 
   // Audio link state
   const [audioLink, setAudioLink] = useState('');
@@ -209,7 +210,33 @@ export default function App() {
       className="min-h-screen bg-[#0a0a0f] text-white font-sans overflow-hidden relative flex flex-col items-center justify-center"
       onClick={handleBackgroundClick}
     >
-      
+      {/* Global Header */}
+      {!fileUrl && (
+        <header className="fixed top-0 left-0 right-0 p-8 flex justify-between items-center z-50 pointer-events-none">
+          <div className="text-xl font-medium tracking-wider bg-clip-text text-transparent bg-gradient-to-r from-[#00f2fe] to-[#4facfe] drop-shadow-[0_0_15px_rgba(0,242,254,0.3)]">
+            FS Avee-Style Music Visualizer
+          </div>
+          <div className="w-12 h-12 rounded-full flex items-center justify-center bg-gradient-to-tr from-[#00f2fe]/10 to-[#4facfe]/10 border border-[#00f2fe]/30 shadow-[0_0_20px_rgba(0,242,254,0.15)] pointer-events-auto cursor-pointer hover:border-[#00f2fe]/60 transition-colors">
+            <User className="w-5 h-5 text-[#00f2fe]" />
+          </div>
+        </header>
+      )}
+
+      {/* Menu Background Video */}
+      {!fileUrl && (
+        <div className="absolute inset-0 z-0">
+          <video
+            autoPlay
+            loop
+            muted
+            playsInline
+            className="absolute inset-0 w-full h-full object-cover opacity-30 mix-blend-screen"
+            src="https://shared.akamai.steamstatic.com/community_assets/images/items/787070/22151511912509a1fc55d69280ae401d62a89afc.webm"
+          />
+          <div className="absolute inset-0 bg-gradient-to-b from-[#0a0a0f]/80 via-[#0a0a0f]/50 to-[#0a0a0f]/90" />
+        </div>
+      )}
+
       {/* Background Visualizer Layer */}
       {fileUrl && (
         <div className="absolute inset-0 pointer-events-none z-10" onClick={handleBackgroundClick}>
@@ -218,15 +245,15 @@ export default function App() {
             mainImgUrl={mainImgUrl}
             mainImgOffsetX={mainRight - mainLeft}
             mainImgOffsetY={mainDown - mainUp}
-            bgImgUrl={bgImgUrl}
-            bgOffsetX={bgRight - bgLeft}
-            bgOffsetY={bgDown - bgUp}
-            bgDimming={bgDimming}
-            bgCinematic={bgCinematic}
+            bgImgUrl={bgImgUrl && !bgImgError ? bgImgUrl : 'https://res.cloudinary.com/dihiciksp/image/upload/v1786649229/fon-fsviz_uaid7j.png'}
+            bgOffsetX={bgImgUrl && !bgImgError ? (bgRight - bgLeft) : 0}
+            bgOffsetY={bgImgUrl && !bgImgError ? (bgDown - bgUp) : 0}
+            bgDimming={bgImgUrl && !bgImgError ? bgDimming : 50}
+            bgCinematic={bgImgUrl && !bgImgError ? bgCinematic : false}
             mainImgZoom={mainImgZoom}
-            bgImgZoom={bgImgZoom}
+            bgImgZoom={bgImgUrl && !bgImgError ? bgImgZoom : 0}
             isRecording={isRecording}
-            exportSettings={{ fps: exportFps, bitrate: exportBitrate * 1000000, mimeType: exportCodec }}
+            exportSettings={{ fps: exportFps, bitrate: exportBitrate * 1000000, mimeType: exportCodec, resolution: exportResolution }}
             onRecordingComplete={handleRecordingComplete}
             frontWaveColor={frontWaveColor}
             backWaveColor={backWaveColor}
@@ -283,6 +310,15 @@ export default function App() {
             
             <div className="space-y-6 mb-8">
               <div>
+                <label className="block text-xs font-medium text-gray-400 mb-2">Resolution</label>
+                <select value={exportResolution} onChange={e => setExportResolution(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-[#00f2fe] appearance-none cursor-pointer">
+                  <option className="bg-[#111116] text-white" value="720p">HD (720p)</option>
+                  <option className="bg-[#111116] text-white" value="1080p">Full HD (1080p) - Recommended</option>
+                  <option className="bg-[#111116] text-white" value="4k">4K (2160p)</option>
+                </select>
+              </div>
+
+              <div>
                 <label className="block text-xs font-medium text-gray-400 mb-2">Frames Per Second (FPS)</label>
                 <select value={exportFps} onChange={e => setExportFps(Number(e.target.value))} className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-[#00f2fe] appearance-none cursor-pointer">
                   <option className="bg-[#111116] text-white" value={30}>30 FPS</option>
@@ -320,6 +356,44 @@ export default function App() {
                 Export
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Export Progress Overlay */}
+      {isRecording && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
+          <div className="bg-[#111116] border border-white/10 rounded-2xl p-8 relative flex flex-col items-center justify-center w-[280px] h-[240px] shadow-2xl animate-in fade-in zoom-in-95">
+             <h3 className="absolute top-6 text-white font-medium text-sm tracking-wide">Exporting Video...</h3>
+             <div className="relative flex items-center justify-center w-32 h-32 mt-4">
+               <svg className="transform -rotate-90 w-full h-full">
+                 <circle
+                   cx="64" cy="64" r="56"
+                   stroke="rgba(255,255,255,0.05)" strokeWidth="4" fill="none"
+                 />
+                 <circle
+                   cx="64" cy="64" r="56"
+                   stroke="#00f2fe" strokeWidth="4" fill="none"
+                   strokeDasharray={2 * Math.PI * 56}
+                   strokeDashoffset={(2 * Math.PI * 56) - ((currentTime / duration || 0) * (2 * Math.PI * 56))}
+                   className="transition-all duration-200"
+                   strokeLinecap="round"
+                 />
+               </svg>
+               <div className="absolute text-2xl font-light text-white">
+                 {((currentTime / duration || 0) * 100).toFixed(0)}%
+               </div>
+             </div>
+             <button
+               onClick={() => {
+                 setIsRecording(false);
+                 if (audioRef.current) audioRef.current.pause();
+               }}
+               className="absolute top-3 right-3 text-gray-500 hover:text-white p-2 transition-colors"
+               title="Cancel Export"
+             >
+               <X className="w-5 h-5" strokeWidth={2} />
+             </button>
           </div>
         </div>
       )}
@@ -578,9 +652,9 @@ export default function App() {
       {/* UI Overlay */}
       {!fileUrl && (
         <div className="z-10 flex flex-col items-center justify-center w-full max-w-xl p-8">
-          <div className="text-center space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-1000">
-            <div className="mx-auto w-24 h-24 bg-gradient-to-tr from-[#00f2fe] to-[#4facfe] rounded-full flex items-center justify-center shadow-[0_0_50px_rgba(0,242,254,0.3)] mb-8">
-              <Music className="w-10 h-10 text-[#0a0a0f]" />
+          <div className="text-center space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-1000 relative z-20">
+            <div className="mx-auto w-28 h-28 bg-gradient-to-tr from-[#00f2fe] to-[#4facfe] rounded-full flex items-center justify-center shadow-[0_0_50px_rgba(0,242,254,0.4)] mb-8">
+              <Music className="w-12 h-12 text-[#0a0a0f]" />
             </div>
             
             <div className="space-y-3">
@@ -593,10 +667,9 @@ export default function App() {
             <div className="mt-8 space-y-4 w-full">
               <button
                 onClick={() => fileInputRef.current?.click()}
-                className="w-full relative group overflow-hidden rounded-full bg-white text-black px-8 py-4 font-medium tracking-wide hover:scale-105 transition-all duration-300 flex items-center justify-center"
+                className="w-full relative group overflow-hidden rounded-full bg-gradient-to-r from-[#00f2fe] to-[#4facfe] text-white px-8 py-4 font-medium tracking-wide hover:scale-[1.02] transition-all duration-300 flex items-center justify-center shadow-[0_0_20px_rgba(0,242,254,0.3)] hover:shadow-[0_0_30px_rgba(0,242,254,0.5)] border border-transparent"
               >
-                <div className="absolute inset-0 w-full h-full bg-gradient-to-r from-[#00f2fe] to-[#4facfe] opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-                <span className="relative flex items-center gap-2 group-hover:text-white transition-colors">
+                <span className="relative flex items-center gap-2 transition-colors">
                   <Upload className="w-5 h-5" />
                   Select Audio File
                 </span>
@@ -612,13 +685,13 @@ export default function App() {
                     if (audioError) setAudioError('');
                   }}
                   className={cn(
-                    "w-full bg-white/5 border rounded-l-full px-6 py-4 text-sm text-white focus:outline-none placeholder:text-gray-500",
-                    audioError ? "border-red-500/50 focus:border-red-500" : "border-white/10 focus:border-[#00f2fe]"
+                    "w-full bg-[#111116]/80 backdrop-blur-md border rounded-l-full px-6 py-4 text-sm text-white focus:outline-none placeholder:text-gray-500",
+                    audioError ? "border-red-500/50 focus:border-red-500" : "border-white/10 focus:border-[#00f2fe]/50"
                   )}
                 />
                 <button 
                   onClick={handleLinkSubmit}
-                  className="bg-[#00f2fe] text-black px-8 py-4 rounded-r-full font-medium hover:bg-[#4facfe] transition-colors border border-transparent"
+                  className="bg-[#00f2fe] text-black px-10 py-4 rounded-r-full font-medium hover:bg-[#4facfe] hover:shadow-[0_0_20px_rgba(0,242,254,0.4)] transition-all duration-300 border border-transparent"
                 >
                   Play
                 </button>
