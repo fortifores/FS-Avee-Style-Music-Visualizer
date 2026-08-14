@@ -4,6 +4,8 @@ import { AudioVisualizer } from './components/AudioVisualizer';
 import { ColorPicker } from './components/ColorPicker';
 import { cn } from './lib/utils';
 
+import fixWebmDuration from 'fix-webm-duration';
+
 const ControlSlider = ({ label, value, onChange, max = 200, min = 0 }: { label: string, value: number, onChange: (v: number) => void, max?: number, min?: number }) => (
   <div className="flex flex-col gap-1 mb-3">
     <div className="flex justify-between text-xs text-gray-400">
@@ -47,8 +49,8 @@ export default function App() {
   const [bgDimming, setBgDimming] = useState(50);
   const [bgCinematic, setBgCinematic] = useState(false);
 
-  const [frontWaveColor, setFrontWaveColor] = useState('#00f2fe');
-  const [backWaveColor, setBackWaveColor] = useState('#4facfe');
+  const [frontWaveColor, setFrontWaveColor] = useState('#bdbdbd');
+  const [backWaveColor, setBackWaveColor] = useState('#858c98');
   const [editingColor, setEditingColor] = useState<'front' | 'back' | 'first' | 'second' | null>(null);
 
   // Waves state
@@ -56,8 +58,8 @@ export default function App() {
 
   // Particles state
   const [followWaves, setFollowWaves] = useState(true);
-  const [firstRowColor, setFirstRowColor] = useState('#00f2fe');
-  const [secondRowColor, setSecondRowColor] = useState('#4facfe');
+  const [firstRowColor, setFirstRowColor] = useState('#bdbdbd');
+  const [secondRowColor, setSecondRowColor] = useState('#858c98');
   const [showFollowInfo, setShowFollowInfo] = useState(false);
 
   // Error state
@@ -70,7 +72,7 @@ export default function App() {
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportFps, setExportFps] = useState(60);
   const [exportBitrate, setExportBitrate] = useState(18); // Mbps
-  const [exportCodec, setExportCodec] = useState('video/webm;codecs=vp9,opus');
+  const [exportCodec, setExportCodec] = useState('video/mp4');
   const [exportResolution, setExportResolution] = useState('1080p');
 
   // Audio link state
@@ -144,10 +146,22 @@ export default function App() {
   }, [isPlaying, fileUrl]);
 
   useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.volume = isMuted ? 0 : volume;
-    }
-  }, [volume, isMuted]);
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't trigger if user is typing in an input
+      if (
+        e.code === 'Space' &&
+        document.activeElement?.tagName !== 'INPUT' &&
+        document.activeElement?.tagName !== 'TEXTAREA'
+      ) {
+        e.preventDefault();
+        if (fileUrl) {
+          setIsPlaying((prev) => !prev);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [fileUrl]);
 
   const handleTimeUpdate = () => {
     if (audioRef.current) {
@@ -194,13 +208,29 @@ export default function App() {
     }
   };
 
-  const handleRecordingComplete = (blob: Blob) => {
+  const handleRecordingComplete = async (blob: Blob) => {
     setIsRecording(false);
-    const url = URL.createObjectURL(blob);
+    
+    let finalBlob = blob;
+    if (blob.type.includes('webm') && duration) {
+      try {
+        finalBlob = await new Promise((resolve, reject) => {
+          // @ts-ignore - type definitions for fix-webm-duration might be missing logger prop
+          fixWebmDuration(blob, duration * 1000, { logger: false }, (fixedBlob, error) => {
+            if (error) reject(error);
+            else resolve(fixedBlob || blob);
+          });
+        });
+      } catch (e) {
+        console.error('Failed to fix WebM duration:', e);
+      }
+    }
+
+    const url = URL.createObjectURL(finalBlob);
     const a = document.createElement('a');
     a.href = url;
     let ext = 'webm';
-    if (blob.type.includes('mp4')) ext = 'mp4';
+    if (finalBlob.type.includes('mp4')) ext = 'mp4';
     a.download = `${file?.name.replace(/\.[^/.]+$/, "") || "export"}_visualizer.${ext}`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -264,6 +294,8 @@ export default function App() {
             secondRowColor={secondRowColor}
             onMainImgError={() => setMainImgError("File not found :(\nCheck your image file and insert it again.")}
             onBgImgError={() => setBgImgError("File not found :(\nCheck your image file and insert it again.")}
+            volume={volume}
+            isMuted={isMuted}
           />
         </div>
       )}
@@ -334,12 +366,13 @@ export default function App() {
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-gray-400 mb-2">Codec / Format</label>
+                <label className="block text-xs font-medium text-gray-400 mb-2">Video Format</label>
                 <select value={exportCodec} onChange={e => setExportCodec(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-[#00f2fe] appearance-none cursor-pointer">
-                  <option className="bg-[#111116] text-white" value="video/webm;codecs=vp9,opus">WebM (VP9) - Recommended</option>
+                  <option className="bg-[#111116] text-white" value="video/mp4">MP4 (H.264) — Recommended for Premiere/DaVinci</option>
+                  <option className="bg-[#111116] text-white" value="video/webm;codecs=vp9,opus">WebM (VP9) — Best for Web/Browsers</option>
                   <option className="bg-[#111116] text-white" value="video/webm;codecs=h264,opus">WebM (H.264)</option>
-                  <option className="bg-[#111116] text-white" value="video/mp4">MP4 (If supported)</option>
                 </select>
+                <p className="text-[10px] text-gray-500 mt-2">MP4 provides the best compatibility with video editors. WebM may not import into all editors, but we fix its metadata duration automatically.</p>
               </div>
             </div>
 

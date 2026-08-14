@@ -28,6 +28,8 @@ interface AudioVisualizerProps {
   secondRowColor?: string;
   onMainImgError?: () => void;
   onBgImgError?: () => void;
+  volume?: number;
+  isMuted?: boolean;
 }
 
 interface Particle {
@@ -74,11 +76,14 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
   firstRowColor = '#00f2fe',
   secondRowColor = '#4facfe',
   onMainImgError,
-  onBgImgError
+  onBgImgError,
+  volume,
+  isMuted
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
+  const gainNodeRef = useRef<GainNode | null>(null);
   const sourceRef = useRef<MediaElementAudioSourceNode | null>(null);
   const connectedElementRef = useRef<HTMLAudioElement | null>(null);
   const particlesRef = useRef<Particle[]>([]);
@@ -140,9 +145,10 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
       analyserRef.current = audioCtxRef.current.createAnalyser();
       analyserRef.current.fftSize = 512;
       analyserRef.current.smoothingTimeConstant = 0.85;
+      gainNodeRef.current = audioCtxRef.current.createGain();
     }
 
-    if (connectedElementRef.current !== audioElement && audioCtxRef.current && analyserRef.current) {
+    if (connectedElementRef.current !== audioElement && audioCtxRef.current && analyserRef.current && gainNodeRef.current) {
       try {
         if (sourceRef.current) {
           try {
@@ -153,7 +159,8 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
         }
         sourceRef.current = audioCtxRef.current.createMediaElementSource(audioElement);
         sourceRef.current.connect(analyserRef.current);
-        analyserRef.current.connect(audioCtxRef.current.destination);
+        analyserRef.current.connect(gainNodeRef.current);
+        gainNodeRef.current.connect(audioCtxRef.current.destination);
         connectedElementRef.current = audioElement;
       } catch (e) {
         console.error('Audio routing error:', e);
@@ -178,6 +185,12 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
     audioElement.addEventListener('play', onPlay);
     return () => audioElement.removeEventListener('play', onPlay);
   }, [audioElement]);
+
+  useEffect(() => {
+    if (gainNodeRef.current) {
+      gainNodeRef.current.gain.value = isMuted ? 0 : (volume !== undefined ? volume : 1);
+    }
+  }, [volume, isMuted]);
 
   // Recording Logic
   useEffect(() => {
@@ -412,22 +425,25 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
             }
           }
 
-          particlesRef.current.forEach((p, index) => {
+          for (let i = particlesRef.current.length - 1; i >= 0; i--) {
+            const p = particlesRef.current[i];
             p.x += p.vx;
             p.y += p.vy;
             p.life++;
+            
             if (p.life >= p.maxLife) {
-              particlesRef.current.splice(index, 1);
-            } else {
-              offscreenCtx.beginPath();
-              offscreenCtx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-              offscreenCtx.fillStyle = p.color;
-              offscreenCtx.globalAlpha = 1 - p.life / p.maxLife;
-              offscreenCtx.shadowBlur = 10;
-              offscreenCtx.shadowColor = p.color;
-              offscreenCtx.fill();
+              particlesRef.current.splice(i, 1);
+              continue;
             }
-          });
+            
+            offscreenCtx.beginPath();
+            offscreenCtx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+            offscreenCtx.fillStyle = p.color;
+            offscreenCtx.globalAlpha = 1 - p.life / p.maxLife;
+            offscreenCtx.shadowBlur = 10;
+            offscreenCtx.shadowColor = p.color;
+            offscreenCtx.fill();
+          }
           offscreenCtx.globalAlpha = 1.0;
           offscreenCtx.shadowBlur = 0;
 
