@@ -2,9 +2,50 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Upload, Music, Play, Pause, RefreshCw, Volume2, VolumeX, Edit2, Download, Loader2, X, User, Info } from 'lucide-react';
 import { AudioVisualizer } from './components/AudioVisualizer';
 import { ColorPicker } from './components/ColorPicker';
+import { AuthModal } from './components/AuthModal';
+import { auth } from './lib/firebase';
+import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { cn } from './lib/utils';
-
 import fixWebmDuration from 'fix-webm-duration';
+import * as MP4Box from 'mp4box';
+
+async function remuxToProgressiveMp4(blob: Blob): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const mp4boxFile = MP4Box.createFile();
+    const chunks: Uint8Array[] = [];
+
+    mp4boxFile.onError = (e: any) => reject(e);
+
+    mp4boxFile.onReady = () => {
+      try {
+        const videoTrack = mp4boxFile.getTrackById(1);
+        if (videoTrack) {
+          mp4boxFile.setSegmentOptions(videoTrack.id, null, { nbSamples: Infinity });
+          mp4boxFile.start();
+        } else {
+          resolve(blob); // fallback if track not found
+        }
+      } catch (e) {
+        resolve(blob);
+      }
+    };
+
+    mp4boxFile.onSegment = (id: number, user: any, buffer: ArrayBuffer) => {
+      chunks.push(new Uint8Array(buffer));
+    };
+
+    blob.arrayBuffer().then((buf) => {
+      try {
+        (buf as any).fileStart = 0;
+        mp4boxFile.appendBuffer(buf);
+        mp4boxFile.flush();
+        resolve(new Blob(chunks, { type: 'video/mp4' }));
+      } catch(e) {
+        resolve(blob); // Fallback to original blob if remuxing fails
+      }
+    }).catch(() => resolve(blob));
+  });
+}
 
 const ControlSlider = ({ label, value, onChange, max = 200, min = 0 }: { label: string, value: number, onChange: (v: number) => void, max?: number, min?: number }) => (
   <div className="flex flex-col gap-1 mb-3">
@@ -31,7 +72,27 @@ export default function App() {
   // Customization State
   const [showCustomization, setShowCustomization] = useState(false);
   const [showInfoModal, setShowInfoModal] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authBlockerState, setAuthBlockerState] = useState<'hidden' | 'cross' | 'arrow'>('hidden');
+  const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
   const [customTab, setCustomTab] = useState<'image' | 'waves' | 'particles'>('image');
+
+  const triggerAuthBlocker = () => {
+    setAuthBlockerState('cross');
+    setTimeout(() => {
+      setAuthBlockerState('arrow');
+    }, 1200);
+  };
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setCurrentUser(user);
+      if (user) {
+        setAuthBlockerState('hidden');
+      }
+    });
+    return () => unsubscribe();
+  }, []);
   
   const [mainImgUrl, setMainImgUrl] = useState('');
   const [mainLeft, setMainLeft] = useState(0);
@@ -69,6 +130,7 @@ export default function App() {
 
   // Export state
   const [isRecording, setIsRecording] = useState(false);
+  const [isFinalizing, setIsFinalizing] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportFps, setExportFps] = useState(60);
   const [exportBitrate, setExportBitrate] = useState(18); // Mbps
@@ -104,6 +166,10 @@ export default function App() {
   };
 
   const handleLinkSubmit = () => {
+    if (!currentUser) {
+      triggerAuthBlocker();
+      return;
+    }
     if (!audioLink) return;
     if (!audioLink.startsWith('https://')) {
       setAudioError('You should paste the link to your file here https://');
@@ -224,6 +290,8 @@ export default function App() {
       } catch (e) {
         console.error('Failed to fix WebM duration:', e);
       }
+    } else if (blob.type.includes('mp4')) {
+      finalBlob = await remuxToProgressiveMp4(blob);
     }
 
     const url = URL.createObjectURL(finalBlob);
@@ -234,6 +302,13 @@ export default function App() {
     a.download = `${file?.name.replace(/\.[^/.]+$/, "") || "export"}_visualizer.${ext}`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setIsFinalizing(false);
+  };
+
+  const handleRecordingError = (message: string) => {
+    setIsRecording(false);
+    setIsFinalizing(false);
+    alert(message); // Could be replaced with a better toast, but alert works for now
   };
 
   return (
@@ -243,12 +318,31 @@ export default function App() {
     >
       {/* Global Header */}
       {!fileUrl && (
-        <header className="fixed top-0 left-0 right-0 p-8 flex justify-between items-center z-50 pointer-events-none">
+        <header className={cn(
+          "fixed top-0 left-0 right-0 p-8 flex justify-between items-center pointer-events-none",
+          authBlockerState !== 'hidden' ? "z-[90]" : "z-50"
+        )}>
           <div className="text-xl font-medium tracking-wider bg-clip-text text-transparent bg-gradient-to-r from-[#00f2fe] to-[#4facfe] drop-shadow-[0_0_15px_rgba(0,242,254,0.3)]">
             FS Avee-Style Music Visualizer
           </div>
-          <div className="w-12 h-12 rounded-full flex items-center justify-center bg-gradient-to-tr from-[#00f2fe]/10 to-[#4facfe]/10 border border-[#00f2fe]/30 shadow-[0_0_20px_rgba(0,242,254,0.15)] pointer-events-auto cursor-pointer hover:border-[#00f2fe]/60 transition-colors">
-            <User className="w-5 h-5 text-[#00f2fe]" />
+          <div 
+            className={cn(
+              "w-12 h-12 rounded-full flex items-center justify-center bg-gradient-to-tr from-[#00f2fe]/10 to-[#4facfe]/10 border border-[#00f2fe]/30 shadow-[0_0_20px_rgba(0,242,254,0.15)] pointer-events-auto cursor-pointer hover:border-[#00f2fe]/60 transition-all overflow-hidden",
+              authBlockerState !== 'hidden' ? "relative z-[90] ring-4 ring-[#00f2fe]/50 ring-offset-2 ring-offset-[#0a0a0f]" : ""
+            )}
+            onClick={() => {
+              setShowAuthModal(true);
+            }}
+          >
+            {currentUser ? (
+              <img 
+                src={currentUser.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${currentUser.displayName || currentUser.email?.split('@')[0]}`} 
+                alt="Profile" 
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <User className="w-5 h-5 text-[#00f2fe]" />
+            )}
           </div>
         </header>
       )}
@@ -262,7 +356,7 @@ export default function App() {
             muted
             playsInline
             className="absolute inset-0 w-full h-full object-cover opacity-30 mix-blend-screen"
-            src="https://shared.akamai.steamstatic.com/community_assets/images/items/787070/22151511912509a1fc55d69280ae401d62a89afc.webm"
+            src="https://res.cloudinary.com/dihiciksp/video/upload/v1786735077/22151511912509a1fc55d69280ae401d62a89afc_x1gyay.webm"
           />
           <div className="absolute inset-0 bg-gradient-to-b from-[#0a0a0f]/80 via-[#0a0a0f]/50 to-[#0a0a0f]/90" />
         </div>
@@ -276,7 +370,7 @@ export default function App() {
             mainImgUrl={mainImgUrl && !mainImgError ? mainImgUrl : 'https://res.cloudinary.com/dihiciksp/image/upload/v1786651249/defolt_main_img_h4sh7j.png'}
             mainImgOffsetX={mainImgUrl && !mainImgError ? (mainRight - mainLeft) : 0}
             mainImgOffsetY={mainImgUrl && !mainImgError ? (mainDown - mainUp) : 0}
-            bgImgUrl={bgImgUrl && !bgImgError ? bgImgUrl : 'https://res.cloudinary.com/dihiciksp/image/upload/v1786650005/fon-fsviz_iu8oh9.png'}
+            bgImgUrl={bgImgUrl && !bgImgError ? bgImgUrl : 'https://res.cloudinary.com/dihiciksp/image/upload/v1786733144/fon-fsviz_zxq51d.png'}
             bgOffsetX={bgImgUrl && !bgImgError ? (bgRight - bgLeft) : 0}
             bgOffsetY={bgImgUrl && !bgImgError ? (bgDown - bgUp) : 0}
             bgDimming={bgImgUrl && !bgImgError ? bgDimming : 50}
@@ -286,6 +380,7 @@ export default function App() {
             isRecording={isRecording}
             exportSettings={{ fps: exportFps, bitrate: exportBitrate * 1000000, mimeType: exportCodec, resolution: exportResolution }}
             onRecordingComplete={handleRecordingComplete}
+            onRecordingError={handleRecordingError}
             frontWaveColor={frontWaveColor}
             backWaveColor={backWaveColor}
             infillWaves={infillWaves}
@@ -309,7 +404,10 @@ export default function App() {
           onLoadedMetadata={handleLoadedMetadata}
           onEnded={() => {
             setIsPlaying(false);
-            setIsRecording(false);
+            if (isRecording) {
+              setIsRecording(false);
+              setIsFinalizing(true);
+            }
           }}
           onError={() => {
             resetTrack();
@@ -370,9 +468,9 @@ export default function App() {
                 <select value={exportCodec} onChange={e => setExportCodec(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-[#00f2fe] appearance-none cursor-pointer">
                   <option className="bg-[#111116] text-white" value="video/mp4">MP4 (H.264) — Recommended for Premiere/DaVinci</option>
                   <option className="bg-[#111116] text-white" value="video/webm;codecs=vp9,opus">WebM (VP9) — Best for Web/Browsers</option>
-                  <option className="bg-[#111116] text-white" value="video/webm;codecs=h264,opus">WebM (H.264)</option>
                 </select>
-                <p className="text-[10px] text-gray-500 mt-2">MP4 provides the best compatibility with video editors. WebM may not import into all editors, but we fix its metadata duration automatically.</p>
+                <p className="text-[10px] text-gray-500 mt-2">MP4 provides the best compatibility with video editors. We remux it automatically so it works in DaVinci. WebM may not import into all editors.</p>
+                <p className="text-[10px] text-orange-400/80 mt-2 font-medium">⚠️ Important: Do not switch tabs or minimize the browser during export, or the video frame rate may drop.</p>
               </div>
             </div>
 
@@ -395,39 +493,49 @@ export default function App() {
       )}
 
       {/* Export Progress Overlay */}
-      {isRecording && (
+      {(isRecording || isFinalizing) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
           <div className="bg-[#111116] border border-white/10 rounded-2xl p-8 relative flex flex-col items-center justify-center w-[280px] h-[240px] shadow-2xl animate-in fade-in zoom-in-95">
-             <h3 className="absolute top-6 text-white font-medium text-sm tracking-wide">Exporting Video...</h3>
+             <h3 className="absolute top-6 text-white font-medium text-sm tracking-wide">
+               {isFinalizing ? 'Finalizing export...' : 'Exporting Video...'}
+             </h3>
              <div className="relative flex items-center justify-center w-32 h-32 mt-4">
-               <svg className="transform -rotate-90 w-full h-full">
-                 <circle
-                   cx="64" cy="64" r="56"
-                   stroke="rgba(255,255,255,0.05)" strokeWidth="4" fill="none"
-                 />
-                 <circle
-                   cx="64" cy="64" r="56"
-                   stroke="#00f2fe" strokeWidth="4" fill="none"
-                   strokeDasharray={2 * Math.PI * 56}
-                   strokeDashoffset={(2 * Math.PI * 56) - ((currentTime / duration || 0) * (2 * Math.PI * 56))}
-                   className="transition-all duration-200"
-                   strokeLinecap="round"
-                 />
-               </svg>
-               <div className="absolute text-2xl font-light text-white">
-                 {((currentTime / duration || 0) * 100).toFixed(0)}%
-               </div>
+               {isFinalizing ? (
+                 <Loader2 className="w-12 h-12 text-[#00f2fe] animate-spin" />
+               ) : (
+                 <>
+                   <svg className="transform -rotate-90 w-full h-full">
+                     <circle
+                       cx="64" cy="64" r="56"
+                       stroke="rgba(255,255,255,0.05)" strokeWidth="4" fill="none"
+                     />
+                     <circle
+                       cx="64" cy="64" r="56"
+                       stroke="#00f2fe" strokeWidth="4" fill="none"
+                       strokeDasharray={2 * Math.PI * 56}
+                       strokeDashoffset={(2 * Math.PI * 56) - ((currentTime / duration || 0) * (2 * Math.PI * 56))}
+                       className="transition-all duration-200"
+                       strokeLinecap="round"
+                     />
+                   </svg>
+                   <div className="absolute text-2xl font-light text-white">
+                     {((currentTime / duration || 0) * 100).toFixed(0)}%
+                   </div>
+                 </>
+               )}
              </div>
-             <button
-               onClick={() => {
-                 setIsRecording(false);
-                 if (audioRef.current) audioRef.current.pause();
-               }}
-               className="absolute top-3 right-3 text-gray-500 hover:text-white p-2 transition-colors"
-               title="Cancel Export"
-             >
-               <X className="w-5 h-5" strokeWidth={2} />
-             </button>
+             {!isFinalizing && (
+               <button
+                 onClick={() => {
+                   setIsRecording(false);
+                   if (audioRef.current) audioRef.current.pause();
+                 }}
+                 className="absolute top-3 right-3 text-gray-500 hover:text-white p-2 transition-colors"
+                 title="Cancel Export"
+               >
+                 <X className="w-5 h-5" strokeWidth={2} />
+               </button>
+             )}
           </div>
         </div>
       )}
@@ -700,7 +808,13 @@ export default function App() {
 
             <div className="mt-8 space-y-4 w-full">
               <button
-                onClick={() => fileInputRef.current?.click()}
+                onClick={() => {
+                  if (!currentUser) {
+                    triggerAuthBlocker();
+                  } else {
+                    fileInputRef.current?.click();
+                  }
+                }}
                 className="w-full relative group overflow-hidden rounded-full bg-gradient-to-r from-[#00f2fe] to-[#4facfe] text-white px-8 py-4 font-medium tracking-wide hover:scale-[1.02] transition-all duration-300 flex items-center justify-center shadow-[0_0_20px_rgba(0,242,254,0.3)] hover:shadow-[0_0_30px_rgba(0,242,254,0.5)] border border-transparent"
               >
                 <span className="relative flex items-center gap-2 transition-colors">
@@ -845,7 +959,33 @@ export default function App() {
         </div>
       </div>
 
+      {/* Auth Blocker Overlay */}
+      {authBlockerState !== 'hidden' && (
+        <div 
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-black/90 backdrop-blur-sm transition-all duration-500"
+        >
+          {authBlockerState === 'cross' && (
+             <div className="animate-in zoom-in-50 fade-in duration-300 text-red-500">
+               <X className="w-40 h-40" strokeWidth={1} />
+             </div>
+          )}
+
+          {authBlockerState === 'arrow' && (
+            <div className="absolute top-24 right-12 animate-in slide-in-from-bottom-10 fade-in duration-500 flex flex-col items-end">
+               <svg className="w-16 h-16 text-[#00f2fe] mb-4 drop-shadow-[0_0_15px_rgba(0,242,254,0.6)] -mt-[34px] mr-[14px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 17L17 7M17 7H9M17 7v8" />
+               </svg>
+               <div className="bg-[#111116] border border-[#00f2fe]/50 rounded-2xl p-5 shadow-[0_0_30px_rgba(0,242,254,0.3)] max-w-[280px] text-right text-gray-200 font-medium leading-relaxed">
+                 Yeah no no sorry first log in or register if you don't have an account
+               </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Info Modal */}
+      <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} />
+
       {showInfoModal && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-md p-4" onClick={() => setShowInfoModal(false)}>
           <div 

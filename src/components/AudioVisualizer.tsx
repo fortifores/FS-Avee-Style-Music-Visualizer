@@ -20,6 +20,7 @@ interface AudioVisualizerProps {
     resolution?: string;
   };
   onRecordingComplete?: (blob: Blob) => void;
+  onRecordingError?: (error: string) => void;
   frontWaveColor?: string;
   backWaveColor?: string;
   infillWaves?: boolean;
@@ -69,6 +70,7 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
   isRecording = false,
   exportSettings,
   onRecordingComplete,
+  onRecordingError,
   frontWaveColor = '#00f2fe',
   backWaveColor = '#4facfe',
   infillWaves = false,
@@ -234,7 +236,6 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
         if (!MediaRecorder.isTypeSupported(mimeType)) {
           const types = [
               'video/mp4',
-              'video/webm;codecs=h264,opus',
               'video/webm;codecs=vp9,opus',
               'video/webm'
           ];
@@ -246,33 +247,45 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
           }
         }
         
-        const recorder = new MediaRecorder(combinedStream, { ...options, mimeType });
-        
-        recorder.ondataavailable = (e) => {
-            if (e.data.size > 0) chunksRef.current.push(e.data);
-        };
-        
-        recorder.onstop = () => {
-            const blob = new Blob(chunksRef.current, { type: mimeType });
-            onRecordingComplete?.(blob);
-            chunksRef.current = [];
-            mediaRecorderRef.current = null;
+        try {
+            const recorder = new MediaRecorder(combinedStream, { ...options, mimeType });
             
-            if (sourceRef.current) {
-                try {
-                    sourceRef.current.disconnect(dest);
-                } catch(e) {}
-            }
-            
-            // Restore canvas size
-            if (canvasRef.current) {
-                canvasRef.current.width = window.innerWidth * window.devicePixelRatio;
-                canvasRef.current.height = window.innerHeight * window.devicePixelRatio;
-            }
-        };
+            recorder.onerror = (e) => {
+                console.error('MediaRecorder error:', e);
+                onRecordingError?.('Recording failed: ' + (e as any).error?.message);
+                mediaRecorderRef.current = null;
+            };
 
-        mediaRecorderRef.current = recorder;
-        recorder.start();
+            recorder.ondataavailable = (e) => {
+                if (e.data.size > 0) chunksRef.current.push(e.data);
+            };
+            
+            recorder.onstop = () => {
+                const blob = new Blob(chunksRef.current, { type: mimeType });
+                onRecordingComplete?.(blob);
+                chunksRef.current = [];
+                mediaRecorderRef.current = null;
+                
+                if (sourceRef.current) {
+                    try {
+                        sourceRef.current.disconnect(dest);
+                    } catch(e) {}
+                }
+                
+                // Restore canvas size
+                if (canvasRef.current) {
+                    canvasRef.current.width = window.innerWidth * window.devicePixelRatio;
+                    canvasRef.current.height = window.innerHeight * window.devicePixelRatio;
+                }
+            };
+
+            mediaRecorderRef.current = recorder;
+            recorder.start();
+        } catch (err: any) {
+            console.error('Failed to start recording:', err);
+            onRecordingError?.('Could not start recording with the selected format: ' + err.message);
+            isRecordingRef.current = false;
+        }
     } else if (!isRecording && mediaRecorderRef.current) {
         if (mediaRecorderRef.current.state !== 'inactive') {
             try {
