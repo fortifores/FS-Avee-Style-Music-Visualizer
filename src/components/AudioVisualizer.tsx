@@ -353,11 +353,22 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
                         try { sourceRef.current.disconnect(state.dest); } catch (e) {}
                     }
 
-                    // 2. Чекаємо, поки рідери справді скасуються — без гонки з подальшим flush()
-                    await Promise.allSettled([
-                        state.videoReader.cancel(),
-                        state.audioReader.cancel(),
-                    ]);
+                    // 2. Намагаємось скасувати рідери, але НЕ чекаємо на них вічно —
+                    //    track.stop() вже й так зупинив постачання нових кадрів,
+                    //    тож навіть якщо cancel() підвисне, це не критично.
+                    try {
+                        await withTimeout(
+                            Promise.allSettled([
+                                state.videoReader.cancel(),
+                                state.audioReader.cancel(),
+                            ]),
+                            5000,
+                            'Reader cancel'
+                        );
+                    } catch (cancelErr) {
+                        console.warn('Reader cancel timed out, proceeding to flush anyway:', cancelErr);
+                        // навмисно НЕ прокидаємо помилку далі — просто йдемо до flush()
+                    }
 
                     // 3. flush() з таймаутом-запобіжником, щоб UI ніколи не завис назавжди
                     await withTimeout(
