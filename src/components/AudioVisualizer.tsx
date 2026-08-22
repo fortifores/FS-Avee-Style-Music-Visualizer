@@ -55,6 +55,9 @@ const getSmoothBin = (data: Uint8Array, index: number, windowSize: number = 2) =
   return sum / count;
 };
 
+import * as Mp4Muxer from 'mp4-muxer';
+import * as WebMMuxer from 'webm-muxer';
+
 export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({ 
   audioElement,
   mainImgUrl,
@@ -96,6 +99,7 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const isRecordingRef = useRef(false);
+  const recordingStateRef = useRef<any>(null);
 
   useEffect(() => {
     isRecordingRef.current = isRecording;
@@ -196,7 +200,8 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
 
   // Recording Logic
   useEffect(() => {
-    if (isRecording && !mediaRecorderRef.current) {
+    if (isRecording && !isRecordingRef.current) {
+        isRecordingRef.current = true;
         const canvas = canvasRef.current;
         const audioCtx = audioCtxRef.current;
         if (!canvas || !audioCtx) return;
@@ -215,88 +220,180 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
         }
 
         const fps = exportSettings?.fps || 60;
-        const canvasStream = canvas.captureStream(fps);
-        
-        const dest = audioCtx.createMediaStreamDestination();
-        if (sourceRef.current) {
-            sourceRef.current.connect(dest);
-        }
-
-        const tracks = [...canvasStream.getVideoTracks(), ...dest.stream.getAudioTracks()];
-        const combinedStream = new MediaStream(tracks);
-
-        let options = { 
-          videoBitsPerSecond: exportSettings?.bitrate || 18000000, 
-          audioBitsPerSecond: 384000 
-        };
-        
-        let mimeType = exportSettings?.mimeType || '';
-        
-        // Fallback if the selected codec is not supported by the browser
-        if (!MediaRecorder.isTypeSupported(mimeType)) {
-          const types = [
-              'video/mp4',
-              'video/webm;codecs=vp9,opus',
-              'video/webm'
-          ];
-          for (const type of types) {
-              if (MediaRecorder.isTypeSupported(type)) {
-                  mimeType = type;
-                  break;
-              }
-          }
-        }
+        const format = exportSettings?.mimeType?.includes('mp4') ? 'mp4' : 'webm';
         
         try {
-            const recorder = new MediaRecorder(combinedStream, { ...options, mimeType });
+            let muxer: any;
+            if (format === 'mp4') {
+                muxer = new Mp4Muxer.Muxer({
+                    target: new Mp4Muxer.ArrayBufferTarget(),
+                    video: { codec: 'avc', width: canvas.width, height: canvas.height },
+                    audio: { codec: 'aac', sampleRate: audioCtx.sampleRate, numberOfChannels: 2 },
+                    firstTimestampBehavior: 'offset',
+                    fastStart: 'in-memory'
+                });
+            } else {
+                muxer = new WebMMuxer.Muxer({
+                    target: new WebMMuxer.ArrayBufferTarget(),
+                    video: { codec: 'V_VP9', width: canvas.width, height: canvas.height },
+                    audio: { codec: 'A_OPUS', sampleRate: audioCtx.sampleRate, numberOfChannels: 2 },
+                    firstTimestampBehavior: 'offset'
+                });
+            }
+
+            const videoEncoder = new VideoEncoder({
+                output: (chunk, meta) => muxer.addVideoChunk(chunk, meta as any),
+                error: e => {
+                    console.error('VideoEncoder error', e);
+                    onRecordingError?.('Video Encoder error: ' + e.message);
+                }
+            });
             
-            recorder.onerror = (e) => {
-                console.error('MediaRecorder error:', e);
-                onRecordingError?.('Recording failed: ' + (e as any).error?.message);
-                mediaRecorderRef.current = null;
+            videoEncoder.configure({
+                codec: format === 'mp4' ? 'avc1.640028' : 'vp09.00.10.08',
+                width: canvas.width,
+                height: canvas.height,
+                bitrate: exportSettings?.bitrate || 18000000,
+                framerate: fps,
+            });
+
+            const audioEncoder = new AudioEncoder({
+                output: (chunk, meta) => muxer.addAudioChunk(chunk, meta as any),
+                error: e => console.error('AudioEncoder error', e)
+            });
+
+            audioEncoder.configure({
+                codec: format === 'mp4' ? 'mp4a.40.2' : 'opus',
+                sampleRate: audioCtx.sampleRate,
+                numberOfChannels: 2,
+                bitrate: 384000,
+            });
+
+            const canvasStream = canvas.captureStream(fps);
+            const dest = audioCtx.createMediaStreamDestination();
+            if (sourceRef.current) {
+                sourceRef.current.connect(dest);
+            }
+
+            const videoTrack = canvasStream.getVideoTracks()[0];
+            const audioTrack = dest.stream.getAudioTracks()[0];
+
+            // @ts-ignore
+            const videoProcessor = new MediaStreamTrackProcessor({ track: videoTrack });
+            // @ts-ignore
+            const audioProcessor = new MediaStreamTrackProcessor({ track: audioTrack });
+
+            const videoReader = videoProcessor.readable.getReader();
+            const audioReader = audioProcessor.readable.getReader();
+
+            recordingStateRef.current = {
+                videoEncoder,
+                audioEncoder,
+                muxer,
+                videoReader,
+                audioReader,
+                videoTrack,
+                audioTrack,
+                dest,
+                format
             };
 
-            recorder.ondataavailable = (e) => {
-                if (e.data.size > 0) chunksRef.current.push(e.data);
-            };
-            
-            recorder.onstop = () => {
-                const blob = new Blob(chunksRef.current, { type: mimeType });
-                onRecordingComplete?.(blob);
-                chunksRef.current = [];
-                mediaRecorderRef.current = null;
-                
-                if (sourceRef.current) {
-                    try {
-                        sourceRef.current.disconnect(dest);
-                    } catch(e) {}
-                }
-                
-                // Restore canvas size
-                if (canvasRef.current) {
-                    canvasRef.current.width = window.innerWidth * window.devicePixelRatio;
-                    canvasRef.current.height = window.innerHeight * window.devicePixelRatio;
-                }
+            const processVideo = async () => {
+                try {
+                    while (true) {
+                        const { done, value } = await videoReader.read();
+                        if (done) break;
+                        if (videoEncoder.state === 'configured') videoEncoder.encode(value);
+                        value.close();
+                    }
+                } catch (e) {}
             };
 
-            mediaRecorderRef.current = recorder;
-            recorder.start();
+            const processAudio = async () => {
+                try {
+                    while (true) {
+                        const { done, value } = await audioReader.read();
+                        if (done) break;
+                        if (audioEncoder.state === 'configured') audioEncoder.encode(value);
+                        value.close();
+                    }
+                } catch (e) {}
+            };
+
+            processVideo();
+            processAudio();
+
         } catch (err: any) {
             console.error('Failed to start recording:', err);
-            onRecordingError?.('Could not start recording with the selected format: ' + err.message);
+            onRecordingError?.('Could not start recording: ' + err.message);
             isRecordingRef.current = false;
         }
-    } else if (!isRecording && mediaRecorderRef.current) {
-        if (mediaRecorderRef.current.state !== 'inactive') {
-            try {
-                mediaRecorderRef.current.requestData();
-            } catch (e) {
-                console.error('Failed to request data:', e);
-            }
-            mediaRecorderRef.current.stop();
+    } else if (!isRecording && recordingStateRef.current) {
+        isRecordingRef.current = false;
+        
+        const state = recordingStateRef.current;
+        recordingStateRef.current = null;
+        
+        if (state) {
+            (async () => {
+                const withTimeout = <T,>(promise: Promise<T>, ms: number, label: string): Promise<T> =>
+                    Promise.race([
+                        promise,
+                        new Promise<T>((_, reject) =>
+                            setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms)
+                        ),
+                    ]);
+
+                try {
+                    // 1. Зупиняємо джерела кадрів
+                    state.videoTrack.stop();
+                    state.audioTrack.stop();
+
+                    if (sourceRef.current && state.dest) {
+                        try { sourceRef.current.disconnect(state.dest); } catch (e) {}
+                    }
+
+                    // 2. Чекаємо, поки рідери справді скасуються — без гонки з подальшим flush()
+                    await Promise.allSettled([
+                        state.videoReader.cancel(),
+                        state.audioReader.cancel(),
+                    ]);
+
+                    // 3. flush() з таймаутом-запобіжником, щоб UI ніколи не завис назавжди
+                    await withTimeout(
+                        Promise.all([state.videoEncoder.flush(), state.audioEncoder.flush()]),
+                        20000,
+                        'Video/Audio encoder flush'
+                    );
+
+                    state.videoEncoder.close();
+                    state.audioEncoder.close();
+                    state.muxer.finalize();
+
+                    const buffer = state.muxer.target.buffer;
+                    const mimeType = state.format === 'mp4' ? 'video/mp4' : 'video/webm';
+                    const blob = new Blob([buffer], { type: mimeType });
+
+                    onRecordingComplete?.(blob);
+                } catch (err: any) {
+                    console.error('Error during finalization:', err);
+                    onRecordingError?.(
+                        'Recording could not be finalized (' + err.message + '). ' +
+                        'Try a lower resolution/FPS or a shorter clip.'
+                    );
+                    try { state.videoEncoder.close(); } catch (e) {}
+                    try { state.audioEncoder.close(); } catch (e) {}
+                } finally {
+                    // Restore canvas size
+                    if (canvasRef.current) {
+                        canvasRef.current.width = window.innerWidth * window.devicePixelRatio;
+                        canvasRef.current.height = window.innerHeight * window.devicePixelRatio;
+                    }
+                }
+            })();
         }
     }
-  }, [isRecording, onRecordingComplete, exportSettings]);
+  }, [isRecording, onRecordingComplete, onRecordingError, exportSettings]);
 
   // Resize canvas
   useEffect(() => {

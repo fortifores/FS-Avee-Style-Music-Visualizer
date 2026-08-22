@@ -6,46 +6,6 @@ import { AuthModal } from './components/AuthModal';
 import { auth } from './lib/firebase';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { cn } from './lib/utils';
-import fixWebmDuration from 'fix-webm-duration';
-import * as MP4Box from 'mp4box';
-
-async function remuxToProgressiveMp4(blob: Blob): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    const mp4boxFile = MP4Box.createFile();
-    const chunks: Uint8Array[] = [];
-
-    mp4boxFile.onError = (e: any) => reject(e);
-
-    mp4boxFile.onReady = () => {
-      try {
-        const videoTrack = mp4boxFile.getTrackById(1);
-        if (videoTrack) {
-          mp4boxFile.setSegmentOptions(videoTrack.id, null, { nbSamples: Infinity });
-          mp4boxFile.start();
-        } else {
-          resolve(blob); // fallback if track not found
-        }
-      } catch (e) {
-        resolve(blob);
-      }
-    };
-
-    mp4boxFile.onSegment = (id: number, user: any, buffer: ArrayBuffer) => {
-      chunks.push(new Uint8Array(buffer));
-    };
-
-    blob.arrayBuffer().then((buf) => {
-      try {
-        (buf as any).fileStart = 0;
-        mp4boxFile.appendBuffer(buf);
-        mp4boxFile.flush();
-        resolve(new Blob(chunks, { type: 'video/mp4' }));
-      } catch(e) {
-        resolve(blob); // Fallback to original blob if remuxing fails
-      }
-    }).catch(() => resolve(blob));
-  });
-}
 
 const ControlSlider = ({ label, value, onChange, max = 200, min = 0 }: { label: string, value: number, onChange: (v: number) => void, max?: number, min?: number }) => (
   <div className="flex flex-col gap-1 mb-3">
@@ -276,33 +236,26 @@ export default function App() {
 
   const handleRecordingComplete = async (blob: Blob) => {
     setIsRecording(false);
-    
-    let finalBlob = blob;
-    if (blob.type.includes('webm') && duration) {
-      try {
-        finalBlob = await new Promise((resolve, reject) => {
-          // @ts-ignore - type definitions for fix-webm-duration might be missing logger prop
-          fixWebmDuration(blob, duration * 1000, { logger: false }, (fixedBlob, error) => {
-            if (error) reject(error);
-            else resolve(fixedBlob || blob);
-          });
-        });
-      } catch (e) {
-        console.error('Failed to fix WebM duration:', e);
-      }
-    } else if (blob.type.includes('mp4')) {
-      finalBlob = await remuxToProgressiveMp4(blob);
-    }
 
-    const url = URL.createObjectURL(finalBlob);
-    const a = document.createElement('a');
-    a.href = url;
-    let ext = 'webm';
-    if (finalBlob.type.includes('mp4')) ext = 'mp4';
-    a.download = `${file?.name.replace(/\.[^/.]+$/, "") || "export"}_visualizer.${ext}`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    setIsFinalizing(false);
+    const triggerDownload = (finalBlob: Blob) => {
+      const url = URL.createObjectURL(finalBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      let ext = 'webm';
+      if (finalBlob.type.includes('mp4')) ext = 'mp4';
+      a.download = `${file?.name.replace(/\.[^/.]+$/, "") || "export"}_visualizer.${ext}`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    };
+
+    try {
+      triggerDownload(blob);
+    } catch (e) {
+      console.error('Post-processing failed, downloading raw recording instead:', e);
+      triggerDownload(blob);
+    } finally {
+      setIsFinalizing(false);
+    }
   };
 
   const handleRecordingError = (message: string) => {
@@ -320,7 +273,7 @@ export default function App() {
       {!fileUrl && (
         <header className={cn(
           "fixed top-0 left-0 right-0 p-8 flex justify-between items-center pointer-events-none",
-          authBlockerState !== 'hidden' ? "z-[90]" : "z-50"
+          authBlockerState === 'arrow' ? "z-[90]" : "z-50"
         )}>
           <div className="text-xl font-medium tracking-wider bg-clip-text text-transparent bg-gradient-to-r from-[#00f2fe] to-[#4facfe] drop-shadow-[0_0_15px_rgba(0,242,254,0.3)]">
             FS Avee-Style Music Visualizer
@@ -328,7 +281,7 @@ export default function App() {
           <div 
             className={cn(
               "w-12 h-12 rounded-full flex items-center justify-center bg-gradient-to-tr from-[#00f2fe]/10 to-[#4facfe]/10 border border-[#00f2fe]/30 shadow-[0_0_20px_rgba(0,242,254,0.15)] pointer-events-auto cursor-pointer hover:border-[#00f2fe]/60 transition-all overflow-hidden",
-              authBlockerState !== 'hidden' ? "relative z-[90] ring-4 ring-[#00f2fe]/50 ring-offset-2 ring-offset-[#0a0a0f]" : ""
+              authBlockerState === 'arrow' ? "relative z-[90] ring-4 ring-[#00f2fe]/50 ring-offset-2 ring-offset-[#0a0a0f]" : ""
             )}
             onClick={() => {
               setShowAuthModal(true);
